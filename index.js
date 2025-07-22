@@ -8,10 +8,22 @@ const cors = require('cors')
 const port = process.env.PORT || 5000
 
 // middleware 
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://bistro-boss-2025-25269.web.app'
+];
+
 app.use(cors({
-    origin: 'http://localhost:5173',  // ✅ আপনার React app এর URL
-    credentials: true                 // ✅ Cookie allow করবে
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
 }));
+
 
 app.use(express.json())
 app.use(cookieParser())
