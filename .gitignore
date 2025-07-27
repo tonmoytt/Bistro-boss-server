@@ -1,2 +1,8 @@
-node_modules
+ 
+.vercel
+
+README.md
+node_modules/
 .env
+uploads/
+

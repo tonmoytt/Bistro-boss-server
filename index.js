@@ -1,13 +1,18 @@
-const express = require('express')
+const express = require('express');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const app = express()
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 require('dotenv').config();
-const cors = require('cors')
-const port = process.env.PORT || 5000
+const cors = require('cors');
 
-// middleware 
+const app = express();
+const port = process.env.PORT || 5000;
+console.log('JWT_SECRET:', process.env.JWT_SECRET);
+
+// Allowed origins for CORS
 const allowedOrigins = [
   'http://localhost:5173',
   'https://bistro-boss-2025-25269.web.app'
@@ -24,209 +29,405 @@ app.use(cors({
   credentials: true
 }));
 
-
-app.use(express.json())
-app.use(cookieParser())
-
-
+app.use(express.json());
+app.use(cookieParser());
 
 // JWT verify middleware
 const verifyToken = (req, res, next) => {
-    console.log('Token verified');
-    const token = req.cookies.token;
+  let token;
 
-    if (!token) {
-        return res.status(401).send({ message: 'Unauthorized access - No token' });
+  // 1️⃣ Try from Authorization header
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  }
+
+  // 2️⃣ If not in header, try from cookie
+  if (!token) {
+    token = req.cookies.token;
+  }
+
+  // 3️⃣ If still not found, unauthorized
+  if (!token) {
+    return res.status(401).send({ message: 'Unauthorized access - No token' });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) {
+      console.error('JWT verify error:', err);
+      return res.status(401).send({ message: 'Unauthorized access - Invalid token' });
     }
-
-    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-        if (err) {
-            console.log(err);
-            return res.status(401).send({ message: 'Unauthorized access - Invalid token' });
-        }
-        req.user = decoded;
-        next();
-    });
+    req.user = decoded;
+    next();
+  });
 };
 
 
-
-
-
-// MongoDB connection
+// MongoDB connection string
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.jfgqsm5.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+// MongoClient setup
 const client = new MongoClient(uri, {
-    serverApi: {
-        version: ServerApiVersion.v1,
-        strict: true,
-        deprecationErrors: true,
-    }
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  }
 });
 
-async function run() {
-    try {
-
-        const cartCollection = client.db('Bistro-boss-2025').collection('Cart'); // Cart collection
-
-
-
-
-        // Express backend এর route (GET /cart)
-
-        app.get('/cart', verifyToken, async (req, res) => {
-            const userEmail = req.query.email;
-            const tokenEmail = req.user.email;
-
-            // security check: token email must match query email
-            if (userEmail !== tokenEmail) {
-                return res.status(403).send({ message: 'Forbidden access' });
-            }
-
-            const userCart = await cartCollection.find({ userEmail }).toArray();
-            res.send(userCart);
-        });
-
-
-        // POST: Add to cart dashboard food item
-        app.post('/cart', verifyToken, async (req, res) => {
-            const item = req.body;
-
-            if (!item?.userEmail || item.userEmail !== req.user.email) {
-                return res.status(403).send({ message: 'Unauthorized access' });
-            }
-
-            const result = await cartCollection.insertOne(item);
-            res.send(result);
-        });
-
-
-
-
-        // Delete player by id - only if owned by user
-        app.delete('/cart/:id', verifyToken, async (req, res) => {
-            const id = req.params.id;
-
-            const result = await cartCollection.deleteOne({ _id: new ObjectId(id), userEmail: req.user.email });
-
-            if (result.deletedCount === 1) {
-                res.send({ success: true, message: 'Item removed' });
-            } else {
-                res.status(404).send({ success: false, message: 'Item not found or unauthorized' });
-            }
-        });
-
-        // Increase quantity
-        app.patch('/cart/increase/:id', verifyToken, async (req, res) => {
-            const id = req.params.id;
-
-            try {
-                const filter = { _id: new ObjectId(id), userEmail: req.user.email };
-                const update = { $inc: { quantity: 1 } };
-
-                const result = await cartCollection.updateOne(filter, update);
-
-                if (result.matchedCount === 0) {
-                    return res.status(404).send({ message: 'Item not found or unauthorized' });
-                }
-
-                res.send({ message: 'Quantity increased', modifiedCount: result.modifiedCount });
-            } catch (error) {
-                console.error('Error increasing quantity:', error);
-                res.status(500).send({ message: 'Internal server error' });
-            }
-        });
-
-        // Decrease quantity
-        app.patch('/cart/decrease/:id', verifyToken, async (req, res) => {
-            const id = req.params.id;
-
-            try {
-                // প্রথমে ডাটাবেজ থেকে আইটেমটি নিয়ে আসা
-                const item = await cartCollection.findOne({ _id: new ObjectId(id), userEmail: req.user.email });
-
-                if (!item) {
-                    return res.status(404).send({ message: 'Item not found or unauthorized' });
-                }
-
-                if (item.quantity <= 1) {
-                    return res.status(400).send({ message: 'Quantity cannot be less than 1' });
-                }
-
-                const result = await cartCollection.updateOne(
-                    { _id: new ObjectId(id), userEmail: req.user.email },
-                    { $inc: { quantity: -1 } }
-                );
-
-                res.send({ message: 'Quantity decreased', modifiedCount: result.modifiedCount });
-            } catch (error) {
-                console.error('Error decreasing quantity:', error);
-                res.status(500).send({ message: 'Internal server error' });
-            }
-        });
-
-
-        // Create JWT token and send as httpOnly cookie
-        app.post('/jwt', (req, res) => {
-            const user = req.body;
-
-            // Optional Suggestion: email check
-            if (!user?.email) {
-                return res.status(400).send({ success: false, message: '❌ Email is required to generate token' });
-            }
-
-            const payload = { email: user.email };
-
-            try {
-                const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
-
-                res.cookie('token', token, {
-                    httpOnly: true,
-                    secure: process.env.NODE_ENV === 'production',
-                    sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax'
-
-                });
-
-                res.send({ success: true, message: '✅ Token issued successfully' });
-
-            } catch (error) {
-                console.error('JWT Generation Error:', error);
-                res.status(500).send({ success: false, message: '❌ Failed to generate token' });
-            }
-        });
-
-        // ✅ JWT logout route (clear cookie)
-        app.post('/logout', (req, res) => {
-            res.clearCookie('token', {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax'
-            });
-            res.send({ success: true, message: '✅ Logged out successfully' });
-        });
-
-
-
-
-
-        // Connect the client to the server	(optional starting in v4.7)
-        await client.connect();
-        // Send a ping to confirm a successful connection
-        await client.db("admin").command({ ping: 1 });
-        console.log("Bistro boss Mogodb running");
-    } finally {
-        // Ensures that the client will close when you finish/error
-        // await client.close();
-    }
+// Multer setup
+const uploadFolder = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadFolder)) {
+  fs.mkdirSync(uploadFolder);
 }
+
+// Multer storage config
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadFolder);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+// Multer file filter (only images allowed)
+const imageFileFilter = (req, file, cb) => {
+  const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+  if (allowedMimeTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed!'), false);
+  }
+};
+
+const upload = multer({ storage, fileFilter: imageFileFilter });
+
+// Run function
+async function run() {
+  try {
+    const cartCollection = client.db('Bistro-boss-2025').collection('Cart'); // Cart collection
+    const userCollection = client.db('Bistro-boss-2025').collection('Users');
+    const ChefCollection = client.db('Bistro-boss-2025').collection('Chef');
+
+    // POST /users route (with file upload)
+    app.post('/users', upload.single('photo'), async (req, res) => {
+      try {
+        const { name, email: rawEmail, uid, createdAt } = req.body;
+        const email = rawEmail?.toLowerCase(); // lowercase conversion
+
+        if (!email || !uid) {
+          return res.status(400).send({ message: 'Email and UID are required' });
+        }
+
+        // Base URL generate dynamically (http://localhost:5000 or https://your-production-domain.com)
+        const baseUrl = req.protocol + '://' + req.get('host');
+
+        // Full photoURL তৈরি, যদি file upload করা হয়
+        const photoURL = req.file ? `${baseUrl}/uploads/${req.file.filename}` : null;
+
+        const existingUser = await userCollection.findOne({ uid });
+
+        const updateData = {
+          name,
+          email,
+        };
+
+        if (photoURL) {
+          updateData.photoURL = photoURL;
+        }
+
+        if (existingUser) {
+          await userCollection.updateOne({ uid }, { $set: updateData });
+          return res.status(200).send({ message: 'User updated', photoURL });
+        } else {
+          await userCollection.insertOne({
+            ...updateData,
+            photoURL,
+            uid,
+            createdAt
+          });
+          return res.status(201).send({ message: 'User created', photoURL });
+        }
+
+      } catch (error) {
+        console.error('Error saving user:', error.stack || error);
+        res.status(500).send({ message: 'Internal server error' });
+      }
+    });
+
+
+
+    // GET /users/:email route to fetch user info
+    app.get('/users/:email', async (req, res) => {
+      const email = req.params.email?.toLowerCase() // 🔥 lowercase করলাম;
+
+      try {
+        const user = await userCollection.findOne({ email });
+
+        if (!user) {
+          return res.status(404).send({ message: 'User not found' });
+        }
+
+        return res.status(200).send(user);
+      } catch (error) {
+        console.error('Error fetching user:', error.stack || error);
+        return res.status(500).send({ message: 'Internal server error' });
+      }
+    });
+
+    // Serve static files from uploads folder
+    app.use('/uploads', express.static(uploadFolder));
+
+    // Cart APIs (same as before)...
+    // GET /cart
+    app.get('/cart', verifyToken, async (req, res) => {
+      const userEmail = req.query.email;
+      const tokenEmail = req.user.email;
+
+      if (userEmail !== tokenEmail) {
+        return res.status(403).send({ message: 'Forbidden access' });
+      }
+
+      const userCart = await cartCollection.find({ userEmail }).toArray();
+      res.send(userCart);
+    });
+
+    // POST /cart
+    app.post('/cart', verifyToken, async (req, res) => {
+      const item = req.body;
+
+      if (!item?.userEmail || item.userEmail !== req.user.email) {
+        return res.status(403).send({ message: 'Unauthorized access' });
+      }
+
+      const result = await cartCollection.insertOne(item);
+      res.send(result);
+    });
+    
+    // DELETE /cart/:id
+    app.delete('/cart/:id', verifyToken, async (req, res) => {
+      const id = req.params.id;
+
+      const result = await cartCollection.deleteOne({ _id: new ObjectId(id), userEmail: req.user.email });
+
+      if (result.deletedCount === 1) {
+        res.send({ success: true, message: 'Item removed' });
+      } else {
+        res.status(404).send({ success: false, message: 'Item not found or unauthorized' });
+      }
+    });
+
+    // PATCH increase quantity
+    app.patch('/cart/increase/:id', verifyToken, async (req, res) => {
+      const id = req.params.id;
+
+      try {
+        const filter = { _id: new ObjectId(id), userEmail: req.user.email };
+        const update = { $inc: { quantity: 1 } };
+
+        const result = await cartCollection.updateOne(filter, update);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ message: 'Item not found or unauthorized' });
+        }
+
+        res.send({ message: 'Quantity increased', modifiedCount: result.modifiedCount });
+      } catch (error) {
+        console.error('Error increasing quantity:', error.stack || error);
+        res.status(500).send({ message: 'Internal server error' });
+      }
+    });
+
+    // PATCH decrease quantity
+    app.patch('/cart/decrease/:id', verifyToken, async (req, res) => {
+      const id = req.params.id;
+
+      try {
+        const item = await cartCollection.findOne({ _id: new ObjectId(id), userEmail: req.user.email });
+
+        if (!item) {
+          return res.status(404).send({ message: 'Item not found or unauthorized' });
+        }
+
+        if (item.quantity <= 1) {
+          return res.status(400).send({ message: 'Quantity cannot be less than 1' });
+        }
+
+        const result = await cartCollection.updateOne(
+          { _id: new ObjectId(id), userEmail: req.user.email },
+          { $inc: { quantity: -1 } }
+        );
+
+        res.send({ message: 'Quantity decreased', modifiedCount: result.modifiedCount });
+      } catch (error) {
+        console.error('Error decreasing quantity:', error.stack || error);
+        res.status(500).send({ message: 'Internal server error' });
+      }
+    });
+
+
+
+    // Chef recommendtion API
+
+   app.post('/chef', verifyToken, async (req, res) => {
+  const item = req.body;
+
+  // 🔍 Check if item already exists for this user
+  const alreadyAdded = await ChefCollection.findOne({
+    userEmail: item.userEmail,
+    name: item.name // বা item.id যদি থাকে
+  });
+
+  if (alreadyAdded) {
+    return res.status(400).send({ message: 'Item already exists in cart' });
+  }
+
+  // ✅ If not, insert it
+  const result = await ChefCollection.insertOne(item);
+  res.send(result);
+});
+
+    app.get('/chef', verifyToken, async (req, res) => {
+      const userEmail = req.query.email;
+      const tokenEmail = req.user.email;
+
+      if (userEmail !== tokenEmail) {
+        return res.status(403).send({ message: 'Forbidden access' });
+      }
+
+      const userCart = await ChefCollection.find({ userEmail }).toArray();
+      res.send(userCart);
+    });
+    // PATCH increase quantity for Chef item
+    app.patch('/chef/increase/:id', verifyToken, async (req, res) => {
+      const id = req.params.id;
+
+      try {
+        const filter = { _id: new ObjectId(id), userEmail: req.user.email };
+        const update = { $inc: { quantity: 1 } };
+
+        const result = await ChefCollection.updateOne(filter, update);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ message: 'Chef item not found or unauthorized' });
+        }
+
+        res.send({ message: 'Quantity increased', modifiedCount: result.modifiedCount });
+      } catch (error) {
+        console.error('Error increasing Chef quantity:', error.stack || error);
+        res.status(500).send({ message: 'Internal server error' });
+      }
+    });
+
+    // PATCH decrease quantity for Chef item
+    app.patch('/chef/decrease/:id', verifyToken, async (req, res) => {
+      const id = req.params.id;
+
+      try {
+        const item = await ChefCollection.findOne({ _id: new ObjectId(id), userEmail: req.user.email });
+
+        if (!item) {
+          return res.status(404).send({ message: 'Chef item not found or unauthorized' });
+        }
+
+        if (item.quantity <= 1) {
+          return res.status(400).send({ message: 'Quantity cannot be less than 1' });
+        }
+
+        const result = await ChefCollection.updateOne(
+          { _id: new ObjectId(id), userEmail: req.user.email },
+          { $inc: { quantity: -1 } }
+        );
+
+        res.send({ message: 'Quantity decreased', modifiedCount: result.modifiedCount });
+      } catch (error) {
+        console.error('Error decreasing Chef quantity:', error.stack || error);
+        res.status(500).send({ message: 'Internal server error' });
+      }
+    });
+
+    // DELETE Chef item
+    app.delete('/chef/:id', verifyToken, async (req, res) => {
+      const id = req.params.id;
+
+      try {
+        const result = await ChefCollection.deleteOne({ _id: new ObjectId(id), userEmail: req.user.email });
+
+        if (result.deletedCount === 1) {
+          res.send({ success: true, message: 'Chef item removed' });
+        } else {
+          res.status(404).send({ success: false, message: 'Chef item not found or unauthorized' });
+        }
+      } catch (error) {
+        console.error('Error deleting Chef item:', error.stack || error);
+        res.status(500).send({ message: 'Internal server error' });
+      }
+    });
+
+
+
+    // JWT generation route
+    app.post('/jwt', (req, res) => {
+      const user = req.body;
+
+      if (!user?.email) {
+        return res.status(400).send({ success: false, message: '❌ Email is required to generate token' });
+      }
+
+      const payload = { email: user.email.toLowerCase() };
+
+      try {
+        const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '2h' });
+
+        res.cookie('token', token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax'
+        });
+
+        // ✅ token পাঠাও frontend এ
+        res.send({
+          success: true,
+          message: '✅ Token issued successfully',
+          token // ✅ Add this!
+        });
+      } catch (error) {
+        console.error('JWT Generation Error:', error.stack || error);
+        res.status(500).send({ success: false, message: '❌ Failed to generate token' });
+      }
+    });
+
+
+    // Logout route
+    app.post('/logout', (req, res) => {
+      res.clearCookie('token', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax'
+      });
+      res.send({ success: true, message: '✅ Logged out successfully' });
+    });
+
+    // Connect MongoDB client & ping
+    await client.connect();
+
+    // await client.db("admin").command({ ping: 1 });
+    console.log("Bistro boss Mogodb running");
+  } finally {
+    // Optional: client.close() যদি প্রয়োজন হয়
+  }
+}
+
 run().catch(console.dir);
 
-
 app.get('/', (req, res) => {
-    res.send('  boss  running!')
-})
+  res.send('boss running!');
+});
 
 app.listen(port, () => {
-    console.log(`Bistro boss server running ${port}`)
-})
+  console.log(`Bistro boss server running on port ${port}`);
+});
+// module.exports = app;
+
