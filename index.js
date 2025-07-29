@@ -15,7 +15,9 @@ console.log('JWT_SECRET:', process.env.JWT_SECRET);
 // Allowed origins for CORS
 const allowedOrigins = [
   'http://localhost:5173',
-  'https://bistro-boss-2025-25269.web.app'
+  'https://bistro-boss-2025-25269.web.app',
+  'https://bistro-boss-ten.vercel.app',
+  'https://bistro-boss-lsbc2vqdb-no-names-projects.vercel.app'
 ];
 
 app.use(cors({
@@ -160,7 +162,7 @@ async function run() {
 
 
     // GET /users/:email route to fetch user info
-    app.get('/users/:email', async (req, res) => {
+    app.get('/get-user/:email', async (req, res) => {
       const email = req.params.email?.toLowerCase() // 🔥 lowercase করলাম;
 
       try {
@@ -289,7 +291,7 @@ async function run() {
   res.send(result);
 });
 
-    app.get('/chef', verifyToken, async (req, res) => {
+    app.get('/get-chef', verifyToken, async (req, res) => {
       const userEmail = req.query.email;
       const tokenEmail = req.user.email;
 
