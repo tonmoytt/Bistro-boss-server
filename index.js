@@ -10,7 +10,7 @@ const cors = require('cors');
 
 const app = express();
 const port = process.env.PORT || 5000;
-console.log('JWT_SECRET:', process.env.JWT_SECRET);
+// console.log('JWT_SECRET:', process.env.JWT_SECRET);
 
 // Allowed origins for CORS
 const allowedOrigins = [
@@ -113,51 +113,105 @@ async function run() {
     const userCollection = client.db('Bistro-boss-2025').collection('Users');
     const ChefCollection = client.db('Bistro-boss-2025').collection('Chef');
 
+app.get('/users/admin/:email', async (req, res) => {
+  const rawEmail = req.params.email;
+  const decodedEmail = decodeURIComponent(rawEmail).toLowerCase(); // 🟢 Fix
+  const user = await userCollection.findOne({ email: decodedEmail });
+
+  if (!user) {
+    return res.status(404).send({ admin: false, message: "User not found" });
+  }
+
+  res.send({ admin: user?.role === 'admin' });
+});
+// ✅ Example route (backend)
+app.get('/users/:email', async (req, res) => {
+  const email = req.params.email;
+  const user = await userCollection.findOne({ email });
+
+  if (!user) {
+    return res.status(404).send({ message: 'User not found' });
+  }
+
+  res.send(user);
+});
+
+  // // ✅ Route: Check Admin Status
+  //   app.get("/users/admin/:email", async (req, res) => {
+  //     const email = req.params.email.toLowerCase();
+  //     const user = await userCollection.findOne({ email });
+  //     res.send({ admin: user?.role === "admin" });
+  //   });
+
+  //   // Optional: Show all users (for testing)
+  //   app.get('/users', async (req, res) => {
+  //     const users = await userCollection.find().toArray();
+  //     res.send(users);
+  //   });
+
+
+
+// user ke admin bananor jonno patch route 
+app.patch('/users/admin/:id', async (req, res) => {
+  const id = req.params.id;
+  const filter = { _id: new ObjectId(id) };
+  const updateDoc = {
+    $set: { role: 'admin' }
+  };
+  const result = await userCollection.updateOne(filter, updateDoc);
+  res.send(result);
+});
+
+
+
+
     // POST /users route (with file upload)
-    app.post('/users', upload.single('photo'), async (req, res) => {
-      try {
-        const { name, email: rawEmail, uid, createdAt } = req.body;
-        const email = rawEmail?.toLowerCase(); // lowercase conversion
+app.post('/users', upload.single('photo'), async (req, res) => {
+  try {
+    const { name, email: rawEmail, uid, createdAt } = req.body;
+    const email = rawEmail?.toLowerCase();
 
-        if (!email || !uid) {
-          return res.status(400).send({ message: 'Email and UID are required' });
-        }
+    if (!email || !uid) {
+      return res.status(400).send({ message: 'Email and UID are required' });
+    }
 
-        // Base URL generate dynamically (http://localhost:5000 or https://your-production-domain.com)
-        const baseUrl = req.protocol + '://' + req.get('host');
+    const baseUrl = req.protocol + '://' + req.get('host');
+    const photoURL = req.file ? `${baseUrl}/uploads/${req.file.filename}` : null;
 
-        // Full photoURL তৈরি, যদি file upload করা হয়
-        const photoURL = req.file ? `${baseUrl}/uploads/${req.file.filename}` : null;
+    const existingUser = await userCollection.findOne({ uid });
 
-        const existingUser = await userCollection.findOne({ uid });
+    const updateData = {
+      name,
+      email,
+       
+    };
 
-        const updateData = {
-          name,
-          email,
-        };
+    if (photoURL) {
+      updateData.photoURL = photoURL;
+    }
 
-        if (photoURL) {
-          updateData.photoURL = photoURL;
-        }
+    if (existingUser) {
+      // ইউজার আপডেট, role ওভাররাইট করো না
+      await userCollection.updateOne({ uid }, { $set: updateData });
+      return res.status(200).send({ message: 'User updated', photoURL });
+    } else {
+      // নতুন ইউজার, ডিফল্ট role 'user' সেট করো
+      await userCollection.insertOne({
+        ...updateData,
+        role: 'user',
+        photoURL,
+        uid,
+        createdAt,
+      });
+      return res.status(201).send({ message: 'User created', photoURL });
+    }
+  } catch (error) {
+    console.error('Error saving user:', error.stack || error);
+    res.status(500).send({ message: 'Internal server error' });
+  }
+});
 
-        if (existingUser) {
-          await userCollection.updateOne({ uid }, { $set: updateData });
-          return res.status(200).send({ message: 'User updated', photoURL });
-        } else {
-          await userCollection.insertOne({
-            ...updateData,
-            photoURL,
-            uid,
-            createdAt
-          });
-          return res.status(201).send({ message: 'User created', photoURL });
-        }
 
-      } catch (error) {
-        console.error('Error saving user:', error.stack || error);
-        res.status(500).send({ message: 'Internal server error' });
-      }
-    });
 
 
 
@@ -381,7 +435,7 @@ async function run() {
       const payload = { email: user.email.toLowerCase() };
 
       try {
-        const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '2h' });
+        const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '365d' });
 
         res.cookie('token', token, {
           httpOnly: true,
