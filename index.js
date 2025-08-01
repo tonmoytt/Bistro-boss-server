@@ -15,8 +15,8 @@ const port = process.env.PORT || 5000;
 // Allowed origins for CORS
 const allowedOrigins = [
   'http://localhost:5173',
-  'https://bistro-boss-2025-25269.web.app',
   'https://bistro-boss-ten.vercel.app',
+  'https://bistro-boss-2025-25269.web.app',
   'https://bistro-boss-lsbc2vqdb-no-names-projects.vercel.app'
 ];
 
@@ -113,106 +113,118 @@ async function run() {
     const userCollection = client.db('Bistro-boss-2025').collection('Users');
     const ChefCollection = client.db('Bistro-boss-2025').collection('Chef');
 
-app.get('/users/admin/:email', async (req, res) => {
-  const rawEmail = req.params.email;
-  const decodedEmail = decodeURIComponent(rawEmail).toLowerCase(); // 🟢 Fix
-  const user = await userCollection.findOne({ email: decodedEmail });
 
-  if (!user) {
-    return res.status(404).send({ admin: false, message: "User not found" });
-  }
+    // admin get 
+    app.get('/users/admin/:email', async (req, res) => {
+      const rawEmail = req.params.email;
+      const decodedEmail = decodeURIComponent(rawEmail).toLowerCase(); // 🟢 Fix
+      const user = await userCollection.findOne({ email: decodedEmail });
 
-  res.send({ admin: user?.role === 'admin' });
-});
-// ✅ Example route (backend)
-app.get('/users/:email', async (req, res) => {
-  const email = req.params.email;
-  const user = await userCollection.findOne({ email });
+      if (!user) {
+        return res.status(404).send({ admin: false, message: "User not found" });
+      }
 
-  if (!user) {
-    return res.status(404).send({ message: 'User not found' });
-  }
+      res.send({ admin: user?.role === 'admin' });
+    });
+    //login admin check (backend)
+    app.get('/users/:email', async (req, res) => {
+      const email = req.params.email;
+      const user = await userCollection.findOne({ email });
 
-  res.send(user);
-});
+      if (!user) {
+        return res.status(404).send({ message: 'User not found' });
+      }
 
-  // // ✅ Route: Check Admin Status
-  //   app.get("/users/admin/:email", async (req, res) => {
-  //     const email = req.params.email.toLowerCase();
-  //     const user = await userCollection.findOne({ email });
-  //     res.send({ admin: user?.role === "admin" });
-  //   });
+      res.send(user);
+    });
 
-  //   // Optional: Show all users (for testing)
-  //   app.get('/users', async (req, res) => {
-  //     const users = await userCollection.find().toArray();
-  //     res.send(users);
-  //   });
-
-
-
-// user ke admin bananor jonno patch route 
-app.patch('/users/admin/:id', async (req, res) => {
-  const id = req.params.id;
-  const filter = { _id: new ObjectId(id) };
-  const updateDoc = {
-    $set: { role: 'admin' }
-  };
-  const result = await userCollection.updateOne(filter, updateDoc);
-  res.send(result);
-});
-
-
+    // user ke admin bananor jonno patch route 
+    app.patch('/users/admin/:id', async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: { role: 'admin' }
+      };
+      const result = await userCollection.updateOne(filter, updateDoc);
+      res.send(result);
+    });
 
 
     // POST /users route (with file upload)
-app.post('/users', upload.single('photo'), async (req, res) => {
-  try {
-    const { name, email: rawEmail, uid, createdAt } = req.body;
-    const email = rawEmail?.toLowerCase();
+    app.post('/users', upload.single('photo'), async (req, res) => {
+      try {
+        const { name, email: rawEmail, uid, createdAt } = req.body;
+        const email = rawEmail?.toLowerCase();
 
-    if (!email || !uid) {
-      return res.status(400).send({ message: 'Email and UID are required' });
-    }
+        if (!email || !uid) {
+          return res.status(400).send({ message: 'Email and UID are required' });
+        }
 
-    const baseUrl = req.protocol + '://' + req.get('host');
-    const photoURL = req.file ? `${baseUrl}/uploads/${req.file.filename}` : null;
+        const baseUrl = req.protocol + '://' + req.get('host');
+        const photoURL = req.file ? `${baseUrl}/uploads/${req.file.filename}` : null;
 
-    const existingUser = await userCollection.findOne({ uid });
+        const existingUser = await userCollection.findOne({ uid });
 
-    const updateData = {
-      name,
-      email,
-       
-    };
+        const updateData = {
+          name,
+          email,
 
-    if (photoURL) {
-      updateData.photoURL = photoURL;
-    }
+        };
 
-    if (existingUser) {
-      // ইউজার আপডেট, role ওভাররাইট করো না
-      await userCollection.updateOne({ uid }, { $set: updateData });
-      return res.status(200).send({ message: 'User updated', photoURL });
-    } else {
-      // নতুন ইউজার, ডিফল্ট role 'user' সেট করো
-      await userCollection.insertOne({
-        ...updateData,
-        role: 'user',
-        photoURL,
-        uid,
-        createdAt,
-      });
-      return res.status(201).send({ message: 'User created', photoURL });
-    }
-  } catch (error) {
-    console.error('Error saving user:', error.stack || error);
-    res.status(500).send({ message: 'Internal server error' });
-  }
-});
+        if (photoURL) {
+          updateData.photoURL = photoURL;
+        }
 
+        if (existingUser) {
+          // ইউজার আপডেট, role ওভাররাইট করো না
+          await userCollection.updateOne({ uid }, { $set: updateData });
+          return res.status(200).send({ message: 'User updated', photoURL });
+        } else {
+          // নতুন ইউজার, ডিফল্ট role 'user' সেট করো
+          await userCollection.insertOne({
+            ...updateData,
+            role: 'user',
+            photoURL,
+            uid,
+            createdAt,
+          });
+          return res.status(201).send({ message: 'User created', photoURL });
+        }
+      } catch (error) {
+        console.error('Error saving user:', error.stack || error);
+        res.status(500).send({ message: 'Internal server error' });
+      }
+    });
 
+    // get all user admindashboard
+    app.get('/allusers', async (req, res) => {
+      try {
+        const result = await userCollection.find().toArray();
+        res.send(result);
+      } catch (err) {
+        console.error("Failed to fetch users:", err);
+        res.status(500).send({ error: "Internal Server Error" });
+      }
+    });
 
+    // dasboard admin banano & delete users
+    // PATCH: Update User Role
+    app.patch('/users/role/:id', async (req, res) => {
+      const id = req.params.id;
+      const { role } = req.body;
+      const result = await userCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { role } }
+      );
+      res.send(result);
+    });
+
+    // DELETE: Delete User
+    app.delete('/users/:id', async (req, res) => {
+      const id = req.params.id;
+      const result = await userCollection.deleteOne({ _id: new ObjectId(id) });
+      res.send(result);
+    });
 
 
     // GET /users/:email route to fetch user info
@@ -261,7 +273,7 @@ app.post('/users', upload.single('photo'), async (req, res) => {
       const result = await cartCollection.insertOne(item);
       res.send(result);
     });
-    
+
     // DELETE /cart/:id
     app.delete('/cart/:id', verifyToken, async (req, res) => {
       const id = req.params.id;
@@ -327,23 +339,23 @@ app.post('/users', upload.single('photo'), async (req, res) => {
 
     // Chef recommendtion API
 
-   app.post('/chef', verifyToken, async (req, res) => {
-  const item = req.body;
+    app.post('/chef', verifyToken, async (req, res) => {
+      const item = req.body;
 
-  // 🔍 Check if item already exists for this user
-  const alreadyAdded = await ChefCollection.findOne({
-    userEmail: item.userEmail,
-    name: item.name // বা item.id যদি থাকে
-  });
+      // 🔍 Check if item already exists for this user
+      const alreadyAdded = await ChefCollection.findOne({
+        userEmail: item.userEmail,
+        name: item.name // বা item.id যদি থাকে
+      });
 
-  if (alreadyAdded) {
-    return res.status(400).send({ message: 'Item already exists in cart' });
-  }
+      if (alreadyAdded) {
+        return res.status(400).send({ message: 'Item already exists in cart' });
+      }
 
-  // ✅ If not, insert it
-  const result = await ChefCollection.insertOne(item);
-  res.send(result);
-});
+      // ✅ If not, insert it
+      const result = await ChefCollection.insertOne(item);
+      res.send(result);
+    });
 
     app.get('/get-chef', verifyToken, async (req, res) => {
       const userEmail = req.query.email;
